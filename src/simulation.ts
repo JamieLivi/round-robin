@@ -145,10 +145,17 @@ export function simulateWeighted(config: SimConfig): SimResult {
 }
 
 /**
- * Pro-rata: one allocation per lender, sized proportionally to their capacity.
- * Matches the DeFi norm (aTokens/cTokens) — every borrow hits every depositor once,
- * in proportion to their share of pool liquidity. Chunk size is ignored.
+ * Pro-rata: each lender's final share is sized proportionally to their capacity.
+ * Matches the DeFi norm (aTokens/cTokens) — on-chain this is one `borrowFrom` per lender.
+ *
+ * For visualisation, we split each lender's share into PRO_RATA_TICKS micro-events
+ * interleaved round-robin-style so all lenders appear to fill in parallel. Each
+ * lender's per-tick amount differs (proportional to their capacity), which is the
+ * whole point of pro-rata — bigger lenders fill faster but finish at the same moment.
+ * Chunk size is ignored.
  */
+const PRO_RATA_TICKS = 10;
+
 export function simulateProRata(config: SimConfig): SimResult {
   const served: Record<string, number> = Object.fromEntries(config.lenders.map((l) => [l.id, 0]));
   const events: SimEvent[] = [];
@@ -157,18 +164,33 @@ export function simulateProRata(config: SimConfig): SimResult {
 
   if (totalCapacity === 0 || capped === 0) return { events, totals: served, totalSteps: 0 };
 
+  // Final target per lender. Last lender sweeps rounding residue for exact fill.
   let allocated = 0;
-  let step = 0;
-  for (let i = 0; i < config.lenders.length; i++) {
-    const lender = config.lenders[i];
+  const targets: number[] = config.lenders.map((lender, i) => {
     const isLast = i === config.lenders.length - 1;
-    // Last lender sweeps any rounding residue to ensure exact fill.
     const share = isLast ? capped - allocated : Math.floor((capped * lender.capacity) / totalCapacity);
-    if (share <= 0) continue;
-    events.push({ step, lenderId: lender.id, amount: share });
-    served[lender.id] = share;
     allocated += share;
-    step++;
+    return share;
+  });
+
+  // Split each lender's target into PRO_RATA_TICKS sub-chunks. Last tick sweeps rounding.
+  let step = 0;
+  for (let tick = 0; tick < PRO_RATA_TICKS; tick++) {
+    for (let i = 0; i < config.lenders.length; i++) {
+      const lender = config.lenders[i];
+      const target = targets[i];
+      if (target <= 0) continue;
+
+      const baseTick = Math.floor(target / PRO_RATA_TICKS);
+      const remaining = target - served[lender.id];
+      const isLastTick = tick === PRO_RATA_TICKS - 1;
+      const amount = isLastTick ? remaining : Math.min(baseTick, remaining);
+
+      if (amount <= 0) continue;
+      events.push({ step, lenderId: lender.id, amount });
+      served[lender.id] += amount;
+      step++;
+    }
   }
 
   return { events, totals: served, totalSteps: events.length };
