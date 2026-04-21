@@ -1,36 +1,66 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { NavLink } from 'react-router';
 import './App.css';
 import { DotsView } from './DotsView';
-import { GanttView } from './GanttView';
-import { simulate, type Agent } from './simulation';
+import { runSimulation, type Lender, type Strategy } from './simulation';
 
-const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+type AppProps = {
+  strategy: Strategy;
+};
 
-function buildAgents(count: number, uniformCapacity: number): Agent[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: LETTERS[i],
-    label: LETTERS[i],
-    capacity: uniformCapacity,
-  }));
+const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+const MAX_LENDERS = LETTERS.length;
+const DEFAULT_CAPACITY = 10_000;
+const POOL_LTV = 0.6; // 60% — matches the real Pacoima Staging pool
+
+function resizeCapacities(prev: number[], nextCount: number): number[] {
+  if (nextCount > prev.length) {
+    return [...prev, ...Array(nextCount - prev.length).fill(DEFAULT_CAPACITY)];
+  }
+  return prev.slice(0, nextCount);
 }
 
-export default function App() {
-  const [agentCount, setAgentCount] = useState(5);
-  const [capacity, setCapacity] = useState(100);
-  const [request, setRequest] = useState(300);
-  const [chunk, setChunk] = useState(20);
-  const [speed, setSpeed] = useState(4); // steps per second
+const formatUsd = (value: number) => `$${value.toLocaleString('en-US')}`;
+
+export default function App({ strategy }: AppProps) {
+  // Largest lender first so the queue-order bias in plain Round-Robin is immediately visible:
+  // A is a $30k whale served first each rotation, but still only gets one chunk per turn.
+  const [lenderCapacities, setLenderCapacities] = useState<number[]>([30_000, 15_000, 5_000]);
+  const lenderCount = lenderCapacities.length;
+
+  // Default to the full pool capacity so a user hitting Play sees the whole allocation
+  // play out — every lender fills up and the two strategies' final states can be compared.
+  const [borrowRequest, setBorrowRequest] = useState(50_000);
+  const [chunk, setChunk] = useState(2_500);
+  const [speed, setSpeed] = useState(2); // steps per second
   const [playing, setPlaying] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
 
-  const agents = useMemo(() => buildAgents(agentCount, capacity), [agentCount, capacity]);
+  const lenders = useMemo<Lender[]>(
+    () =>
+      lenderCapacities.map((cap, i) => ({
+        id: LETTERS[i],
+        label: LETTERS[i],
+        capacity: cap,
+      })),
+    [lenderCapacities],
+  );
 
-  const result = useMemo(() => simulate({ agents, request, chunk }), [agents, request, chunk]);
+  const result = useMemo(
+    () => runSimulation(strategy, { lenders, borrowRequest, chunk }),
+    [strategy, lenders, borrowRequest, chunk],
+  );
 
   // Reset step if config changed past current position
   useEffect(() => {
     if (currentStep > result.totalSteps) setCurrentStep(result.totalSteps);
   }, [result.totalSteps, currentStep]);
+
+  // When the route (strategy) changes, reset playback so the user sees the new run from scratch.
+  useEffect(() => {
+    setCurrentStep(0);
+    setPlaying(false);
+  }, [strategy]);
 
   // Auto-advance when playing
   const intervalRef = useRef<number | null>(null);
@@ -55,18 +85,22 @@ export default function App() {
 
   // Compute totals-so-far from events[0..currentStep]
   const servedNow = useMemo(() => {
-    const map: Record<string, number> = Object.fromEntries(agents.map((a) => [a.id, 0]));
+    const map: Record<string, number> = Object.fromEntries(lenders.map((l) => [l.id, 0]));
     for (let i = 0; i < currentStep; i++) {
       const e = result.events[i];
       if (!e) break;
-      map[e.agentId] += e.amount;
+      map[e.lenderId] += e.amount;
     }
     return map;
-  }, [agents, result.events, currentStep]);
+  }, [lenders, result.events, currentStep]);
 
-  const activeAgentId = currentStep > 0 ? result.events[currentStep - 1]?.agentId ?? null : null;
+  const activeLenderId = currentStep > 0 ? result.events[currentStep - 1]?.lenderId ?? null : null;
   const currentEvent = currentStep > 0 ? result.events[currentStep - 1] : null;
-  const remaining = request - Object.values(servedNow).reduce((a, b) => a + b, 0);
+  const totalAllocated = Object.values(servedNow).reduce((a, b) => a + b, 0);
+  const remaining = borrowRequest - totalAllocated;
+  const totalDeposited = lenderCapacities.reduce((a, b) => a + b, 0);
+  const impliedBorrowProceeds = Math.round(borrowRequest * POOL_LTV);
+  const impliedChunkBorrow = Math.round(chunk * POOL_LTV);
 
   const handleReset = () => {
     setPlaying(false);
@@ -81,43 +115,175 @@ export default function App() {
     if (currentStep > 0) setCurrentStep(currentStep - 1);
   };
 
+  const handleLenderCountChange = (next: number) => {
+    setLenderCapacities((prev) => resizeCapacities(prev, next));
+  };
+
+  const handleCapacityChange = (index: number, value: number) => {
+    setLenderCapacities((prev) => prev.map((c, i) => (i === index ? value : c)));
+  };
+
   return (
     <div className="app">
       <header>
-        <h1>Round-Robin Allocation</h1>
+        <div className="eyebrow">Profitr borrow-lend · directed pool</div>
+        <h1>{strategy === 'WEIGHTED_ROUND_ROBIN' ? 'Weighted Round-Robin' : 'Round-Robin'} Allocation</h1>
         <p className="subtitle">
-          {agentCount} agents each with capacity {capacity}. Request size {request}, chunk size {chunk}.
-          Each step hands one chunk to the next eligible agent.
+          Simulates how a pending borrow request is matched against registered lenders in a directed
+          pool. Each step represents one on-chain <code>borrowFrom</code> call issued by the worker.
         </p>
+
+        <nav className="strategy-toggle" role="tablist">
+          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')} role="tab">
+            Round-Robin
+          </NavLink>
+          <NavLink
+            to="/weighted"
+            className={({ isActive }) => (isActive ? 'active' : '')}
+            role="tab"
+          >
+            Weighted Round-Robin
+          </NavLink>
+        </nav>
       </header>
 
-      <section className="panel">
-        <h2>Current state</h2>
-        <DotsView agents={agents} servedNow={servedNow} activeAgentId={activeAgentId} />
-        <div className="live-stats">
-          <span>
-            Step <strong>{currentStep}</strong> / {result.totalSteps}
-          </span>
-          <span>
-            Remaining <strong>{Math.max(0, remaining)}</strong> / {request}
-          </span>
-          {currentEvent && (
-            <span>
-              Just served <strong>{currentEvent.agentId}</strong> → {currentEvent.amount}
-            </span>
-          )}
+      <section className="panel explainer">
+        <h2>How {strategy === 'WEIGHTED_ROUND_ROBIN' ? 'Weighted Round-Robin' : 'Round-Robin'} works here</h2>
+        {strategy === 'ROUND_ROBIN' ? (
+          <ul>
+            <li>
+              <strong>Every lender gets the same chunk per turn</strong>, regardless of deposit size.
+              The rotation visits each lender in order; once served, they go to the back of the queue.
+            </li>
+            <li>
+              <strong>Bigger lenders are under-deployed</strong> — a $50k depositor receives the same
+              per-turn chunk as a $2k depositor, so their capital sits idle while the queue rotates.
+            </li>
+            <li>
+              <strong>Small lenders are never starved</strong> — they see activity on every borrow.
+              Good for engagement-focused pools.
+            </li>
+          </ul>
+        ) : (
+          <ul>
+            <li>
+              <strong>Bigger deposits earn credit faster</strong>. Each round, every lender accrues
+              allocation credit proportional to their deposit. Once a lender has a chunk's worth of
+              credit, they get served.
+            </li>
+            <li>
+              <strong>Unused credit carries over</strong> — if a chunk can't be served this round, the
+              remaining credit sticks around for the next. Long-run totals trend to exact pro-rata.
+            </li>
+            <li>
+              <strong>Per-tx size is still bounded</strong> by the admin-set chunk, preserving the
+              audit-friendly granularity of plain Round-Robin.
+            </li>
+          </ul>
+        )}
+        <div className="explainer-grid">
+          <div>
+            <div className="explainer-label">Dots</div>
+            <div>Registered lenders. Size scales with deposit.</div>
+          </div>
+          <div>
+            <div className="explainer-label">Fill level</div>
+            <div>Collateral pledged against this borrow so far.</div>
+          </div>
+          <div>
+            <div className="explainer-label">Borrow request</div>
+            <div>
+              {formatUsd(borrowRequest)} collateral ⇒ {formatUsd(impliedBorrowProceeds)} borrow at{' '}
+              {Math.round(POOL_LTV * 100)}% LTV
+            </div>
+          </div>
+          <div>
+            <div className="explainer-label">Chunk size</div>
+            <div>
+              {formatUsd(chunk)} collateral per tx ≈ {formatUsd(impliedChunkBorrow)} USDC borrow
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="panel">
-        <h2>Timeline</h2>
-        <div className="scroll">
-          <GanttView
-            agents={agents}
-            events={result.events}
-            currentStep={currentStep}
-            totalSteps={result.totalSteps}
-          />
+        <h2>Live state</h2>
+        <DotsView lenders={lenders} servedNow={servedNow} activeLenderId={activeLenderId} />
+        <div className="live-stats">
+          <span>
+            Tx <strong>{currentStep}</strong> / {result.totalSteps}
+          </span>
+          <span>
+            Filled <strong>{formatUsd(totalAllocated)}</strong> / {formatUsd(borrowRequest)}
+          </span>
+          <span>
+            Remaining <strong>{formatUsd(Math.max(0, remaining))}</strong>
+          </span>
+          {currentEvent && (
+            <span>
+              Last tx: <strong>borrowFrom(Lender {currentEvent.lenderId})</strong> →{' '}
+              {formatUsd(currentEvent.amount)}
+            </span>
+          )}
+        </div>
+
+        <div className="utilisation-panel">
+          <div className="utilisation-header">
+            <span>Per-lender outcome so far</span>
+          </div>
+          {lenders.map((lender, i) => {
+            const s = servedNow[lender.id] ?? 0;
+            const utilisation = lender.capacity > 0 ? (s / lender.capacity) * 100 : 0;
+            const shareOfAllocated = totalAllocated > 0 ? (s / totalAllocated) * 100 : 0;
+            const shareOfDeposits = totalDeposited > 0 ? (lender.capacity / totalDeposited) * 100 : 0;
+            return (
+              <div key={lender.id} className="utilisation-row">
+                <div className="utilisation-label">
+                  <span className="queue-pos">{i + 1}</span>
+                  <span>
+                    Lender <strong>{lender.label}</strong>
+                  </span>
+                </div>
+                <div className="utilisation-bar">
+                  <div className="utilisation-fill" style={{ width: `${Math.min(100, utilisation)}%` }} />
+                </div>
+                <div className="utilisation-figures">
+                  <span>{formatUsd(s)}</span>
+                  <span className="muted">
+                    {utilisation.toFixed(0)}% of capacity · {shareOfAllocated.toFixed(0)}% of flow ·{' '}
+                    {shareOfDeposits.toFixed(0)}% of pool
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="panel chunk-feature">
+        <div className="chunk-header">
+          <h2>Chunk size</h2>
+          <span className="chunk-sublabel">
+            Per-lender allocation per turn — the admin's main lever
+          </span>
+        </div>
+        <div className="chunk-display">{formatUsd(chunk)}</div>
+        <div className="chunk-hint-row">
+          ≈ {formatUsd(impliedChunkBorrow)} of USDC borrow per <code>borrowFrom</code> tx at{' '}
+          {Math.round(POOL_LTV * 100)}% LTV
+        </div>
+        <input
+          type="range"
+          className="chunk-slider"
+          min={100}
+          max={20_000}
+          step={100}
+          value={chunk}
+          onChange={(e) => setChunk(Number(e.target.value))}
+        />
+        <div className="chunk-extremes">
+          <span>$100 — many small txs, fair rotation</span>
+          <span>$20,000 — few large txs, biased rotation</span>
         </div>
       </section>
 
@@ -136,25 +302,11 @@ export default function App() {
         </div>
 
         <label>
-          Scrub timeline: step {currentStep}
-          <input
-            type="range"
-            min={0}
-            max={result.totalSteps}
-            value={currentStep}
-            onChange={(e) => {
-              setPlaying(false);
-              setCurrentStep(Number(e.target.value));
-            }}
-          />
-        </label>
-
-        <label>
           Playback speed: <strong>{speed}x</strong>
           <input
             type="range"
             min={1}
-            max={60}
+            max={5}
             value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
           />
@@ -163,59 +315,53 @@ export default function App() {
         <hr />
 
         <label>
-          Agents: <strong>{agentCount}</strong>
+          Registered lenders: <strong>{lenderCount}</strong>
           <input
             type="range"
             min={2}
-            max={8}
-            value={agentCount}
-            onChange={(e) => setAgentCount(Number(e.target.value))}
+            max={MAX_LENDERS}
+            value={lenderCount}
+            onChange={(e) => handleLenderCountChange(Number(e.target.value))}
           />
         </label>
 
+        <div className="capacity-grid">
+          {lenderCapacities.map((cap, i) => (
+            <label key={LETTERS[i]} className="capacity-row">
+              <span>
+                Lender <strong>{LETTERS[i]}</strong> deposited: <strong>{formatUsd(cap)}</strong>
+              </span>
+              <input
+                type="range"
+                min={500}
+                max={100_000}
+                step={500}
+                value={cap}
+                onChange={(e) => handleCapacityChange(i, Number(e.target.value))}
+              />
+            </label>
+          ))}
+          <div className="capacity-total">Total deposits in pool: {formatUsd(totalDeposited)}</div>
+        </div>
+
+        <hr />
+
         <label>
-          Per-agent capacity: <strong>{capacity}</strong>
+          Borrow request (collateral pledged): <strong>{formatUsd(borrowRequest)}</strong>
+          <span className="hint">
+            ≈ {formatUsd(impliedBorrowProceeds)} of USDC borrow at {Math.round(POOL_LTV * 100)}% LTV
+          </span>
           <input
             type="range"
-            min={20}
-            max={500}
-            step={10}
-            value={capacity}
-            onChange={(e) => setCapacity(Number(e.target.value))}
+            min={500}
+            max={200_000}
+            step={500}
+            value={borrowRequest}
+            onChange={(e) => setBorrowRequest(Number(e.target.value))}
           />
         </label>
 
-        <label>
-          Request size: <strong>{request}</strong>
-          <input
-            type="range"
-            min={10}
-            max={2000}
-            step={10}
-            value={request}
-            onChange={(e) => setRequest(Number(e.target.value))}
-          />
-        </label>
-
-        <label>
-          Chunk size: <strong>{chunk}</strong>
-          <input
-            type="range"
-            min={1}
-            max={200}
-            value={chunk}
-            onChange={(e) => setChunk(Number(e.target.value))}
-          />
-        </label>
       </section>
-
-      <footer>
-        <p>
-          The top dots show the current fill level per agent and highlight whose turn it is. The timeline below
-          shows the full history — scrub back and forth or play it out. Try setting the chunk to 1 and watching
-          the pattern emerge.
-        </p>
-      </footer>
     </div>
   );
 }

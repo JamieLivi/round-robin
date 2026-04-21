@@ -1,8 +1,8 @@
 import { motion } from 'motion/react';
-import type { Agent, SimEvent } from './simulation';
+import type { Lender, SimEvent } from './simulation';
 
 type Props = {
-  agents: Agent[];
+  lenders: Lender[];
   events: SimEvent[];
   currentStep: number;
   /** Total step count for the entire precomputed run — used for X-axis scale. */
@@ -11,26 +11,26 @@ type Props = {
 
 const ROW_HEIGHT = 38;
 const ROW_GAP = 6;
-const LABEL_COL_WIDTH = 56;
+const LABEL_COL_WIDTH = 80;
 const PADDING = 16;
 
-export function GanttView({ agents, events, currentStep, totalSteps }: Props) {
+export function GanttView({ lenders, events, currentStep, totalSteps }: Props) {
   const cellWidth = totalSteps > 0 ? Math.max(16, Math.min(48, 1200 / totalSteps)) : 32;
   const timelineWidth = Math.max(400, totalSteps * cellWidth);
   const width = LABEL_COL_WIDTH + timelineWidth + PADDING * 2;
-  const height = PADDING * 2 + agents.length * (ROW_HEIGHT + ROW_GAP);
+  const height = PADDING * 2 + lenders.length * (ROW_HEIGHT + ROW_GAP);
 
-  const agentIndex: Record<string, number> = Object.fromEntries(agents.map((a, i) => [a.id, i]));
+  const lenderIndex: Record<string, number> = Object.fromEntries(lenders.map((l, i) => [l.id, i]));
 
   const maxAmount = events.reduce((m, e) => (e.amount > m ? e.amount : m), 1);
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ maxWidth: width }}>
       {/* Row backgrounds + labels */}
-      {agents.map((agent, i) => {
+      {lenders.map((lender, i) => {
         const y = PADDING + i * (ROW_HEIGHT + ROW_GAP);
         return (
-          <g key={agent.id}>
+          <g key={lender.id}>
             <rect
               x={LABEL_COL_WIDTH}
               y={y}
@@ -42,7 +42,7 @@ export function GanttView({ agents, events, currentStep, totalSteps }: Props) {
               rx={4}
             />
             <text x={LABEL_COL_WIDTH - 10} y={y + ROW_HEIGHT / 2 + 5} textAnchor="end" fill="#cbd5e1" fontSize={13} fontWeight={600}>
-              {agent.label}
+              Lender {lender.label}
             </text>
           </g>
         );
@@ -66,7 +66,7 @@ export function GanttView({ agents, events, currentStep, totalSteps }: Props) {
 
       {/* Served blocks — one per event, up to currentStep */}
       {events.slice(0, currentStep).map((event, i) => {
-        const rowIdx = agentIndex[event.agentId];
+        const rowIdx = lenderIndex[event.lenderId];
         if (rowIdx === undefined) return null;
         const x = LABEL_COL_WIDTH + i * cellWidth;
         const y = PADDING + rowIdx * (ROW_HEIGHT + ROW_GAP);
@@ -84,17 +84,17 @@ export function GanttView({ agents, events, currentStep, totalSteps }: Props) {
               fill={fill}
               rx={3}
             />
-            {cellWidth > 24 && (
+            {cellWidth > 32 && (
               <text
                 x={x + cellWidth / 2}
                 y={y + ROW_HEIGHT / 2 + 4}
                 textAnchor="middle"
                 fill="#f8fafc"
-                fontSize={11}
+                fontSize={10}
                 fontWeight={600}
                 style={{ pointerEvents: 'none' }}
               >
-                {event.amount}
+                ${(event.amount / 1000).toFixed(event.amount >= 10_000 ? 0 : 1)}k
               </text>
             )}
           </motion.g>
