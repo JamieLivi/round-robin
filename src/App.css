@@ -364,6 +364,22 @@ footer code {
   font-size: 11px;
 }
 
+.utilisation-figures .apr-value {
+  color: #f59e0b;
+  font-weight: 700;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.utilisation-hint code {
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
 @media (max-width: 640px) {
   .utilisation-row {
     grid-template-columns: 1fr;
@@ -483,4 +499,86 @@ footer code {
   color: #94a3b8;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.play-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 24px;
+  background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 14px;
+  flex-wrap: wrap;
+}
+
+.play-hero-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: #f59e0b;
+  color: #0f172a;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 32px;
+  font-size: 18px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+  letter-spacing: 0.01em;
+}
+
+.play-hero-button:hover {
+  background: #fbbf24;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.35);
+}
+
+.play-hero-button:active {
+  transform: translateY(0);
+}
+
+.play-icon {
+  font-size: 16px;
+}
+
+.play-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.play-secondary {
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.play-secondary:hover:not(:disabled) {
+  background: #334155;
+}
+
+.play-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.play-step-indicator {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.play-step-indicator strong {
+  color: #f1f5f9;
 }

@@ -12,6 +12,7 @@ const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 const MAX_LENDERS = LETTERS.length;
 const DEFAULT_CAPACITY = 10_000;
 const POOL_LTV = 0.6; // 60% — matches the real Pacoima Staging pool
+const POOL_APR = 0.05; // 5% — nominal interest rate paid on borrowed (deployed) capital
 
 function resizeCapacities(prev: number[], nextCount: number): number[] {
   if (nextCount > prev.length) {
@@ -206,6 +207,42 @@ export default function App({ strategy }: AppProps) {
         </div>
       </section>
 
+      <div className="play-hero">
+        <button
+          className="play-hero-button"
+          onClick={() => setPlaying((p) => !p)}
+          aria-label={playing ? 'Pause' : 'Play'}
+        >
+          {playing ? (
+            <>
+              <span className="play-icon" aria-hidden>❚❚</span> Pause
+            </>
+          ) : (
+            <>
+              <span className="play-icon" aria-hidden>▶</span> Play
+            </>
+          )}
+        </button>
+        <div className="play-hero-meta">
+          <button onClick={handleBack} disabled={currentStep === 0} className="play-secondary">
+            ← Back
+          </button>
+          <button
+            onClick={handleStep}
+            disabled={currentStep >= result.totalSteps}
+            className="play-secondary"
+          >
+            Step →
+          </button>
+          <button onClick={handleReset} className="play-secondary">
+            ⟲ Reset
+          </button>
+          <span className="play-step-indicator">
+            Tx <strong>{currentStep}</strong> / {result.totalSteps}
+          </span>
+        </div>
+      </div>
+
       <section className="panel">
         <h2>Live state</h2>
         <DotsView lenders={lenders} servedNow={servedNow} activeLenderId={activeLenderId} />
@@ -230,10 +267,17 @@ export default function App({ strategy }: AppProps) {
         <div className="utilisation-panel">
           <div className="utilisation-header">
             <span>Per-lender outcome so far</span>
+            <span className="utilisation-hint">
+              Pool pays <strong>{(POOL_APR * 100).toFixed(1)}% APR</strong> on deployed capital.
+              Effective APR per lender ={' '}
+              <code>{(POOL_APR * 100).toFixed(1)}% × (allocated ÷ deposited)</code> — under-deployed
+              lenders earn less than the headline rate even though their capital was locked in the pool.
+            </span>
           </div>
           {lenders.map((lender, i) => {
             const s = servedNow[lender.id] ?? 0;
-            const utilisation = lender.capacity > 0 ? (s / lender.capacity) * 100 : 0;
+            const utilisation = lender.capacity > 0 ? s / lender.capacity : 0;
+            const effectiveApr = POOL_APR * utilisation;
             const shareOfAllocated = totalAllocated > 0 ? (s / totalAllocated) * 100 : 0;
             const shareOfDeposits = totalDeposited > 0 ? (lender.capacity / totalDeposited) * 100 : 0;
             return (
@@ -245,13 +289,17 @@ export default function App({ strategy }: AppProps) {
                   </span>
                 </div>
                 <div className="utilisation-bar">
-                  <div className="utilisation-fill" style={{ width: `${Math.min(100, utilisation)}%` }} />
+                  <div
+                    className="utilisation-fill"
+                    style={{ width: `${Math.min(100, utilisation * 100)}%` }}
+                  />
                 </div>
                 <div className="utilisation-figures">
-                  <span>{formatUsd(s)}</span>
+                  <span className="apr-value">{(effectiveApr * 100).toFixed(2)}% APR</span>
+                  <span>{formatUsd(s)} allocated</span>
                   <span className="muted">
-                    {utilisation.toFixed(0)}% of capacity · {shareOfAllocated.toFixed(0)}% of flow ·{' '}
-                    {shareOfDeposits.toFixed(0)}% of pool
+                    {(utilisation * 100).toFixed(0)}% of capacity ·{' '}
+                    {shareOfAllocated.toFixed(0)}% of flow · {shareOfDeposits.toFixed(0)}% of pool
                   </span>
                 </div>
               </div>
@@ -288,19 +336,6 @@ export default function App({ strategy }: AppProps) {
       </section>
 
       <section className="panel controls">
-        <div className="control-row">
-          <button onClick={() => setPlaying((p) => !p)} className="primary">
-            {playing ? '❚❚ Pause' : '▶ Play'}
-          </button>
-          <button onClick={handleBack} disabled={currentStep === 0}>
-            ← Back
-          </button>
-          <button onClick={handleStep} disabled={currentStep >= result.totalSteps}>
-            Step →
-          </button>
-          <button onClick={handleReset}>⟲ Reset</button>
-        </div>
-
         <label>
           Playback speed: <strong>{speed}x</strong>
           <input
