@@ -14,6 +14,10 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<App strategy="ROUND_ROBIN" />} />
         <Route path="/weighted" element={<App strategy="WEIGHTED_ROUND_ROBIN" />} />
+        <Route path="/pro-rata" element={<App strategy="PRO_RATA" />} />
+        <Route path="/fifo" element={<App strategy="FIFO" />} />
+        <Route path="/largest-first" element={<App strategy="LARGEST_FIRST" />} />
+        <Route path="/equal-split" element={<App strategy="EQUAL_SPLIT" />} />
         {/* Anything else → home */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

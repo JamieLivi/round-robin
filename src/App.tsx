@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink } from 'react-router';
 import './App.css';
 import { DotsView } from './DotsView';
-import { runSimulation, type Lender, type Strategy } from './simulation';
+import { runSimulation, STRATEGY_USES_CHUNK, type Lender, type Strategy } from './simulation';
+
+const STRATEGY_LABELS: Record<Strategy, string> = {
+  ROUND_ROBIN: 'Round-Robin',
+  WEIGHTED_ROUND_ROBIN: 'Weighted Round-Robin',
+  PRO_RATA: 'Pro-Rata',
+  FIFO: 'FIFO',
+  LARGEST_FIRST: 'Largest-First',
+  EQUAL_SPLIT: 'Equal-Split',
+};
 
 type AppProps = {
   strategy: Strategy;
@@ -128,7 +137,7 @@ export default function App({ strategy }: AppProps) {
     <div className="app">
       <header>
         <div className="eyebrow">Borrow-lend · directed pool</div>
-        <h1>{strategy === 'WEIGHTED_ROUND_ROBIN' ? 'Weighted Round-Robin' : 'Round-Robin'} Allocation</h1>
+        <h1>{STRATEGY_LABELS[strategy]} Allocation</h1>
         <p className="subtitle">
           Simulates how a pending borrow request is matched against registered lenders in a directed
           pool. Each step represents one on-chain <code>borrowFrom</code> call issued by the worker.
@@ -145,12 +154,36 @@ export default function App({ strategy }: AppProps) {
           >
             Weighted Round-Robin
           </NavLink>
+          <NavLink
+            to="/pro-rata"
+            className={({ isActive }) => (isActive ? 'active' : '')}
+            role="tab"
+          >
+            Pro-Rata
+          </NavLink>
+          <NavLink to="/fifo" className={({ isActive }) => (isActive ? 'active' : '')} role="tab">
+            FIFO
+          </NavLink>
+          <NavLink
+            to="/largest-first"
+            className={({ isActive }) => (isActive ? 'active' : '')}
+            role="tab"
+          >
+            Largest-First
+          </NavLink>
+          <NavLink
+            to="/equal-split"
+            className={({ isActive }) => (isActive ? 'active' : '')}
+            role="tab"
+          >
+            Equal-Split
+          </NavLink>
         </nav>
       </header>
 
       <section className="panel explainer">
-        <h2>How {strategy === 'WEIGHTED_ROUND_ROBIN' ? 'Weighted Round-Robin' : 'Round-Robin'} works here</h2>
-        {strategy === 'ROUND_ROBIN' ? (
+        <h2>How {STRATEGY_LABELS[strategy]} works here</h2>
+        {strategy === 'ROUND_ROBIN' && (
           <ul>
             <li>
               <strong>Every lender gets the same chunk per turn</strong>, regardless of deposit size.
@@ -165,7 +198,8 @@ export default function App({ strategy }: AppProps) {
               Good for engagement-focused pools.
             </li>
           </ul>
-        ) : (
+        )}
+        {strategy === 'WEIGHTED_ROUND_ROBIN' && (
           <ul>
             <li>
               <strong>Bigger deposits earn credit faster</strong>. Each round, every lender accrues
@@ -179,6 +213,75 @@ export default function App({ strategy }: AppProps) {
             <li>
               <strong>Per-tx size is still bounded</strong> by the admin-set chunk, preserving the
               audit-friendly granularity of plain Round-Robin.
+            </li>
+          </ul>
+        )}
+        {strategy === 'PRO_RATA' && (
+          <ul>
+            <li>
+              <strong>Every lender gets served once per borrow request</strong>, with a share sized
+              exactly in proportion to their deposit. No rotation, no chunking — one{' '}
+              <code>borrowFrom</code> tx per lender.
+            </li>
+            <li>
+              <strong>Effective APR is identical</strong> for every lender. Capital deployment is
+              perfectly proportional to pool share, so everyone earns the pool's headline rate.
+            </li>
+            <li>
+              <strong>This is the DeFi norm</strong> — Aave, Compound and Morpho all allocate this
+              way via receipt tokens (aTokens / cTokens). No admin knob to tune.
+            </li>
+          </ul>
+        )}
+        {strategy === 'FIFO' && (
+          <ul>
+            <li>
+              <strong>Smallest depositors get filled first</strong>. Lenders are sorted by deposit
+              size ascending; each one is filled to their full capacity before the next gets any
+              allocation.
+            </li>
+            <li>
+              <strong>Early-sorted lenders reach 100% deployment</strong> and earn the full pool APR;
+              later (bigger) lenders may not see any flow at all on small borrow requests.
+            </li>
+            <li>
+              <strong>Centrifuge Tinlake–style epoch ordering</strong> — favours retail lenders over
+              whales. One <code>borrowFrom</code> tx per served lender, no chunking.
+            </li>
+          </ul>
+        )}
+        {strategy === 'LARGEST_FIRST' && (
+          <ul>
+            <li>
+              <strong>Biggest depositor fills first</strong>. Lenders are sorted by deposit size
+              descending; the largest lender absorbs as much of the request as they can before any
+              smaller lender is touched.
+            </li>
+            <li>
+              <strong>Fewest possible on-chain txs</strong> — a large borrow often closes in one or
+              two <code>borrowFrom</code> calls. Gas-efficient for institutional pools.
+            </li>
+            <li>
+              <strong>Small lenders get no flow</strong> on modest requests — their capital sits
+              idle earning 0% effective APR while the whale earns the full rate.
+            </li>
+          </ul>
+        )}
+        {strategy === 'EQUAL_SPLIT' && (
+          <ul>
+            <li>
+              <strong>Everyone gets the same dollar amount</strong>. The borrow is divided equally
+              across all eligible lenders regardless of deposit size — a $50k lender and a $2k
+              lender receive identical allocations.
+            </li>
+            <li>
+              <strong>Capped lenders drop out and the residual redistributes</strong>. If the
+              per-lender share exceeds someone's capacity, they fill to their cap and the excess
+              flows to the remaining lenders in a second pass.
+            </li>
+            <li>
+              <strong>Small lenders hit 100% APR fast; whales stay under-deployed</strong>. This is
+              the opposite skew to pro-rata — fair by dollar amount, unfair by capital efficiency.
             </li>
           </ul>
         )}
@@ -198,12 +301,14 @@ export default function App({ strategy }: AppProps) {
               {Math.round(POOL_LTV * 100)}% LTV
             </div>
           </div>
-          <div>
-            <div className="explainer-label">Chunk size</div>
+          {STRATEGY_USES_CHUNK[strategy] && (
             <div>
-              {formatUsd(chunk)} collateral per tx ≈ {formatUsd(impliedChunkBorrow)} USDC borrow
+              <div className="explainer-label">Chunk size</div>
+              <div>
+                {formatUsd(chunk)} collateral per tx ≈ {formatUsd(impliedChunkBorrow)} USDC borrow
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </section>
 
@@ -308,32 +413,34 @@ export default function App({ strategy }: AppProps) {
         </div>
       </section>
 
-      <section className="panel chunk-feature">
-        <div className="chunk-header">
-          <h2>Chunk size</h2>
-          <span className="chunk-sublabel">
-            Per-lender allocation per turn — the admin's main lever
-          </span>
-        </div>
-        <div className="chunk-display">{formatUsd(chunk)}</div>
-        <div className="chunk-hint-row">
-          ≈ {formatUsd(impliedChunkBorrow)} of USDC borrow per <code>borrowFrom</code> tx at{' '}
-          {Math.round(POOL_LTV * 100)}% LTV
-        </div>
-        <input
-          type="range"
-          className="chunk-slider"
-          min={100}
-          max={20_000}
-          step={100}
-          value={chunk}
-          onChange={(e) => setChunk(Number(e.target.value))}
-        />
-        <div className="chunk-extremes">
-          <span>$100 — many small txs, fair rotation</span>
-          <span>$20,000 — few large txs, biased rotation</span>
-        </div>
-      </section>
+      {STRATEGY_USES_CHUNK[strategy] && (
+        <section className="panel chunk-feature">
+          <div className="chunk-header">
+            <h2>Chunk size</h2>
+            <span className="chunk-sublabel">
+              Per-lender allocation per turn — the admin's main lever
+            </span>
+          </div>
+          <div className="chunk-display">{formatUsd(chunk)}</div>
+          <div className="chunk-hint-row">
+            ≈ {formatUsd(impliedChunkBorrow)} of USDC borrow per <code>borrowFrom</code> tx at{' '}
+            {Math.round(POOL_LTV * 100)}% LTV
+          </div>
+          <input
+            type="range"
+            className="chunk-slider"
+            min={100}
+            max={20_000}
+            step={100}
+            value={chunk}
+            onChange={(e) => setChunk(Number(e.target.value))}
+          />
+          <div className="chunk-extremes">
+            <span>$100 — many small txs, fair rotation</span>
+            <span>$20,000 — few large txs, biased rotation</span>
+          </div>
+        </section>
+      )}
 
       <section className="panel controls">
         <label>

@@ -10,7 +10,22 @@ export type SimEvent = {
   amount: number;
 };
 
-export type Strategy = 'ROUND_ROBIN' | 'WEIGHTED_ROUND_ROBIN';
+export type Strategy =
+  | 'ROUND_ROBIN'
+  | 'WEIGHTED_ROUND_ROBIN'
+  | 'PRO_RATA'
+  | 'FIFO'
+  | 'LARGEST_FIRST'
+  | 'EQUAL_SPLIT';
+
+export const STRATEGY_USES_CHUNK: Record<Strategy, boolean> = {
+  ROUND_ROBIN: true,
+  WEIGHTED_ROUND_ROBIN: true,
+  PRO_RATA: false,
+  FIFO: false,
+  LARGEST_FIRST: false,
+  EQUAL_SPLIT: false,
+};
 
 export type SimConfig = {
   lenders: Lender[];
@@ -129,6 +144,146 @@ export function simulateWeighted(config: SimConfig): SimResult {
   return { events, totals: served, totalSteps: events.length };
 }
 
+/**
+ * Pro-rata: one allocation per lender, sized proportionally to their capacity.
+ * Matches the DeFi norm (aTokens/cTokens) — every borrow hits every depositor once,
+ * in proportion to their share of pool liquidity. Chunk size is ignored.
+ */
+export function simulateProRata(config: SimConfig): SimResult {
+  const served: Record<string, number> = Object.fromEntries(config.lenders.map((l) => [l.id, 0]));
+  const events: SimEvent[] = [];
+  const totalCapacity = config.lenders.reduce((sum, l) => sum + l.capacity, 0);
+  const capped = Math.min(config.borrowRequest, totalCapacity);
+
+  if (totalCapacity === 0 || capped === 0) return { events, totals: served, totalSteps: 0 };
+
+  let allocated = 0;
+  let step = 0;
+  for (let i = 0; i < config.lenders.length; i++) {
+    const lender = config.lenders[i];
+    const isLast = i === config.lenders.length - 1;
+    // Last lender sweeps any rounding residue to ensure exact fill.
+    const share = isLast ? capped - allocated : Math.floor((capped * lender.capacity) / totalCapacity);
+    if (share <= 0) continue;
+    events.push({ step, lenderId: lender.id, amount: share });
+    served[lender.id] = share;
+    allocated += share;
+    step++;
+  }
+
+  return { events, totals: served, totalSteps: events.length };
+}
+
+/**
+ * FIFO (as implemented in Profitr): smallest depositors get filled first. Sort
+ * lenders by capacity ASC, then greedily fill each to their cap before moving on.
+ * Chunk size is ignored — each lender receives a single allocation.
+ */
+export function simulateFifo(config: SimConfig): SimResult {
+  const served: Record<string, number> = Object.fromEntries(config.lenders.map((l) => [l.id, 0]));
+  const events: SimEvent[] = [];
+  const sorted = [...config.lenders].sort((a, b) => a.capacity - b.capacity);
+
+  let remaining = config.borrowRequest;
+  let step = 0;
+  for (const lender of sorted) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, lender.capacity);
+    if (take <= 0) continue;
+    events.push({ step, lenderId: lender.id, amount: take });
+    served[lender.id] = take;
+    remaining -= take;
+    step++;
+  }
+
+  return { events, totals: served, totalSteps: events.length };
+}
+
+/**
+ * Largest-first: sort lenders by capacity DESC, greedily fill each to their cap.
+ * Minimises on-chain calls (biggest lender absorbs most of the borrow in one tx).
+ */
+export function simulateLargestFirst(config: SimConfig): SimResult {
+  const served: Record<string, number> = Object.fromEntries(config.lenders.map((l) => [l.id, 0]));
+  const events: SimEvent[] = [];
+  const sorted = [...config.lenders].sort((a, b) => b.capacity - a.capacity);
+
+  let remaining = config.borrowRequest;
+  let step = 0;
+  for (const lender of sorted) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, lender.capacity);
+    if (take <= 0) continue;
+    events.push({ step, lenderId: lender.id, amount: take });
+    served[lender.id] = take;
+    remaining -= take;
+    step++;
+  }
+
+  return { events, totals: served, totalSteps: events.length };
+}
+
+/**
+ * Equal-split: divide the remaining borrow equally across uncapped lenders.
+ * When a lender hits their cap, drop them from the eligible set and redistribute
+ * the residual to the rest. Repeats until filled or everyone is capped.
+ *
+ * To show the redistribution logic in playback, we emit one event per lender per pass
+ * (rather than consolidating into a final-total-per-lender). This matches the mental
+ * model — pass 1 tries to split equally, pass 2 absorbs the residual, etc.
+ */
+export function simulateEqualSplit(config: SimConfig): SimResult {
+  const served: Record<string, number> = Object.fromEntries(config.lenders.map((l) => [l.id, 0]));
+  const events: SimEvent[] = [];
+  let remaining = config.borrowRequest;
+  let eligible = [...config.lenders];
+  let step = 0;
+  const MAX_PASSES = 20;
+
+  for (let pass = 0; pass < MAX_PASSES && remaining > 0 && eligible.length > 0; pass++) {
+    const perLender = Math.floor(remaining / eligible.length);
+    if (perLender <= 0) break;
+
+    const nextEligible: Lender[] = [];
+
+    for (const lender of eligible) {
+      if (remaining <= 0) break;
+      const headroom = lender.capacity - (served[lender.id] ?? 0);
+      const share = Math.min(perLender, headroom, remaining);
+
+      if (share > 0) {
+        events.push({ step, lenderId: lender.id, amount: share });
+        served[lender.id] = (served[lender.id] ?? 0) + share;
+        remaining -= share;
+        step++;
+      }
+
+      if (lender.capacity - (served[lender.id] ?? 0) > 0) {
+        nextEligible.push(lender);
+      }
+    }
+
+    // Nobody was dropped AND remaining didn't go down — avoid infinite loop.
+    if (nextEligible.length === eligible.length && perLender === 0) break;
+    eligible = nextEligible;
+  }
+
+  return { events, totals: served, totalSteps: events.length };
+}
+
 export function runSimulation(strategy: Strategy, config: SimConfig): SimResult {
-  return strategy === 'WEIGHTED_ROUND_ROBIN' ? simulateWeighted(config) : simulate(config);
+  switch (strategy) {
+    case 'WEIGHTED_ROUND_ROBIN':
+      return simulateWeighted(config);
+    case 'PRO_RATA':
+      return simulateProRata(config);
+    case 'FIFO':
+      return simulateFifo(config);
+    case 'LARGEST_FIRST':
+      return simulateLargestFirst(config);
+    case 'EQUAL_SPLIT':
+      return simulateEqualSplit(config);
+    default:
+      return simulate(config);
+  }
 }
