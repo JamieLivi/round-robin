@@ -55,7 +55,7 @@ export function DotsView({ lenders, servedNow, activeLenderId }: Props) {
                   cy={CENTER}
                   r={radius + 8}
                   fill="none"
-                  stroke="#f59e0b"
+                  stroke="#d97706"
                   strokeWidth={3}
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -67,8 +67,8 @@ export function DotsView({ lenders, servedNow, activeLenderId }: Props) {
                 cx={CENTER}
                 cy={CENTER}
                 r={radius}
-                fill="#1e293b"
-                stroke="#334155"
+                fill="#f1f5f9"
+                stroke="#cbd5e1"
                 strokeWidth={2}
                 animate={{ r: radius }}
                 transition={{ type: 'spring', stiffness: 200, damping: 25 }}
@@ -87,7 +87,7 @@ export function DotsView({ lenders, servedNow, activeLenderId }: Props) {
                 cx={CENTER}
                 cy={CENTER}
                 r={radius}
-                fill="#3b82f6"
+                fill="#2563eb"
                 clipPath={`url(#clip-${lender.id})`}
                 animate={{ opacity: fillRatio > 0 ? 1 : 0 }}
                 transition={{ duration: 0.2 }}

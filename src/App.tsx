@@ -127,7 +127,7 @@ export default function App({ strategy }: AppProps) {
   return (
     <div className="app">
       <header>
-        <div className="eyebrow">Profitr borrow-lend · directed pool</div>
+        <div className="eyebrow">Borrow-lend · directed pool</div>
         <h1>{strategy === 'WEIGHTED_ROUND_ROBIN' ? 'Weighted Round-Robin' : 'Round-Robin'} Allocation</h1>
         <p className="subtitle">
           Simulates how a pending borrow request is matched against registered lenders in a directed
