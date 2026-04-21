@@ -337,19 +337,6 @@ export default function App({ strategy }: AppProps) {
 
       <section className="panel controls">
         <label>
-          Playback speed: <strong>{speed}x</strong>
-          <input
-            type="range"
-            min={1}
-            max={5}
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          />
-        </label>
-
-        <hr />
-
-        <label>
           Registered lenders: <strong>{lenderCount}</strong>
           <input
             type="range"
@@ -396,6 +383,18 @@ export default function App({ strategy }: AppProps) {
           />
         </label>
 
+        <hr />
+
+        <label>
+          Playback speed: <strong>{speed}x</strong>
+          <input
+            type="range"
+            min={1}
+            max={5}
+            value={speed}
+            onChange={(e) => setSpeed(Number(e.target.value))}
+          />
+        </label>
       </section>
     </div>
   );
