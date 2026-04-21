@@ -1,73 +1,43 @@
-# React + TypeScript + Vite
+# Round-Robin Allocation Visualiser
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Interactive visualisation of the plain round-robin allocation algorithm. Built as an
+"explorable explanation" to illustrate how chunk size and
+agent count affect the resulting allocation pattern.
 
-Currently, two official plugins are available:
+## Layout
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Top panel** — dots, one per agent. The current active dot is highlighted; each dot fills up as it accumulates allocations.
+- **Bottom panel** — Gantt-style timeline. Each row is an agent; each coloured block is one allocation event.
+- **Controls** — play/pause/step/reset, a scrubber to jump to any point in time, playback speed, and sliders for the simulation parameters.
 
-## React Compiler
+## Run
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+bun install
+bun dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Then open [http://localhost:5173](http://localhost:5173).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Try this
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- Set **chunk = 1** and watch every agent get served in strict rotation.
+- Set **chunk = request** — only the first agent gets anything.
+- Crank **speed** to 60× and scrub through the timeline to see the emerging pattern.
+- Make **request > total capacity** — the allocation stops early when everyone's full.
+
+## Structure
+
 ```
+src/
+├── simulation.ts   # pure allocation logic — produces an event stream
+├── DotsView.tsx    # top panel: dots with fill animation
+├── GanttView.tsx   # bottom panel: Gantt timeline with playhead
+└── App.tsx         # state, controls, layout
+```
+
+## Stack
+
+- Vite + React 19 + TypeScript
+- [motion](https://motion.dev/) for SVG animations
+- Plain CSS
